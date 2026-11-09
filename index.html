@@ -1,0 +1,157 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Ludo</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#1c2260;color:#fffaf0;font:600 16px system-ui,sans-serif;overflow:hidden;touch-action:manipulation}
+body{display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:max(10px,env(safe-area-inset-top)) 8px max(12px,env(safe-area-inset-bottom))}
+#top{display:flex;align-items:center;justify-content:space-between;width:100%;max-width:560px}
+#sy{display:flex;align-items:center;gap:8px;font-size:18px}
+#dot{width:20px;height:20px;border-radius:50%;border:3px solid #fff;background:#888}
+#lk{width:10px;height:10px;border-radius:50%;background:#777;display:inline-block;margin-right:8px}
+#lk.on{background:#43a047}
+#b{border:5px solid #111;border-radius:10px;background:#fffaf0;max-width:100%}
+#bar{display:flex;align-items:center;gap:16px}
+#dice{width:80px;height:80px;background:#fff;border-radius:16px;border:5px solid #888;display:grid;grid-template:repeat(3,1fr)/repeat(3,1fr);padding:9px;box-shadow:0 5px 0 rgba(0,0,0,.35)}
+#dice i{display:block}#dice i.p{background:#111;border-radius:50%;margin:1px}
+#dice.sh{animation:sh .14s infinite}
+@keyframes sh{50%{transform:rotate(14deg) scale(1.08)}}
+button,input{font:inherit;border:0;border-radius:12px;padding:10px 18px}
+button{background:#ffd23f;color:#222;box-shadow:0 4px 0 #b58a00}
+button:active{transform:translateY(3px);box-shadow:0 1px 0 #b58a00}
+#ov{position:fixed;inset:0;background:rgba(14,16,50,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center}
+#ov h1{font-size:44px;margin:0;letter-spacing:2px}
+#seats{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+#seats button{width:92px;color:#fff;text-shadow:0 1px 2px #000;box-shadow:0 4px 0 rgba(0,0,0,.4)}
+#ov input{background:#fffaf0;color:#222;width:min(320px,90vw)}
+</style></head><body>
+<div id=top><div id=sy><span id=dot></span><span id=say>Ludo</span></div><div><span id=lk></span><button id=menu>Menu</button></div></div>
+<canvas id=b></canvas>
+<div id=bar><div id=dice></div><button id=rb>Roll</button></div>
+<div id=ov></div>
+<script>
+const $=i=>document.getElementById(i),sl=ms=>new Promise(r=>setTimeout(r,ms));
+const C=['red','green','yellow','blue'],COL={red:'#e53935',green:'#43a047',yellow:'#fdd835',blue:'#1e88e5'},DK={red:'#8e1b1b',green:'#1b5e20',yellow:'#a58900',blue:'#0d47a1'};
+const START={red:0,green:13,yellow:26,blue:39},YO={red:[0,0],green:[9,0],yellow:[9,9],blue:[0,9]};
+const SAFE=new Set([0,8,13,21,26,34,39,47]);
+const P=[],add=(x,y)=>P.push([x,y]);
+for(let x=1;x<=5;x++)add(x,6);for(let y=5;y>=0;y--)add(6,y);add(7,0);add(8,0);
+for(let y=1;y<=5;y++)add(8,y);for(let x=9;x<=14;x++)add(x,6);add(14,7);add(14,8);
+for(let x=13;x>=9;x--)add(x,8);for(let y=9;y<=14;y++)add(8,y);add(7,14);add(6,14);
+for(let y=13;y>=9;y--)add(6,y);for(let x=5;x>=0;x--)add(x,8);add(0,7);add(0,6);
+const hc=(c,k)=>c=='red'?[k,7]:c=='green'?[7,k]:c=='yellow'?[14-k,7]:[7,14-k];
+const YD={};for(const c of C)YD[c]=[[2,2],[4,2],[2,4],[4,4]].map(([a,b])=>[a+YO[c][0],b+YO[c][1]]);
+const abs=(c,s)=>(START[c]+s)%52;
+const seat={red:1,green:2,yellow:1,blue:2};
+let G=null,forced=[],ws=null,hits=[];
+const isBot=c=>seat[c]==2,cur=()=>G.players[G.i];
+
+/* ---------- drawing ---------- */
+const cv=$('b'),g=cv.getContext('2d');let S=0,U=0;
+function fit(){const w=Math.max(200,Math.min(innerWidth-16,innerHeight-230,560)),d=devicePixelRatio||1;
+ cv.style.width=cv.style.height=w+'px';cv.width=cv.height=w*d;S=w*d;U=S/15}
+const rc=(x,y,w,h,f)=>{g.fillStyle=f;g.fillRect(x*U,y*U,w*U,h*U)};
+function tri(a,b,c){g.beginPath();g.moveTo(a[0]*U,a[1]*U);g.lineTo(b[0]*U,b[1]*U);g.lineTo(7.5*U,7.5*U);g.closePath();g.fillStyle=COL[c];g.fill();g.stroke()}
+function pos(c,s,i){if(s<0)return YD[c][i];if(s>55)return[7.5,7.5];const p=s<=50?P[abs(c,s)]:hc(c,s-50);return[p[0]+.5,p[1]+.5]}
+function movable(){if(!G||G.phase!='move')return[];const T=G.tok[cur()],d=G.dice;return[0,1,2,3].filter(i=>T[i]<0?d==6:T[i]+d<=56)}
+function draw(){
+ g.fillStyle='#fffaf0';g.fillRect(0,0,S,S);g.lineWidth=2;g.strokeStyle='#222';
+ for(const c of C){const[x,y]=YO[c];rc(x,y,6,6,COL[c]);rc(x+1,y+1,4,4,'#fffaf0');g.strokeRect(x*U,y*U,6*U,6*U);
+  YD[c].forEach(([a,b])=>{g.beginPath();g.arc(a*U,b*U,.55*U,0,7);g.fillStyle=COL[c]+'66';g.fill();g.strokeStyle=DK[c];g.stroke()})}
+ g.lineWidth=1.5;g.strokeStyle='#333';
+ const cells=P.map((p,k)=>{let f='#fff';for(const c of C)if(START[c]==k)f=COL[c];return[p[0],p[1],f]});
+ for(const c of C)for(let k=1;k<=5;k++){const p=hc(c,k);cells.push([p[0],p[1],COL[c]])}
+ cells.forEach(([x,y,f])=>{rc(x,y,1,1,f);g.strokeRect(x*U,y*U,U,U)});
+ g.fillStyle='#8a8a8a';g.font=U*.7+'px sans-serif';g.textAlign='center';g.textBaseline='middle';
+ for(const k of SAFE)if(!Object.values(START).includes(k))g.fillText('★',(P[k][0]+.5)*U,(P[k][1]+.55)*U);
+ g.lineWidth=1.5;tri([6,6],[6,9],'red');tri([6,6],[9,6],'green');tri([9,6],[9,9],'yellow');tri([6,9],[9,9],'blue');
+ if(!G)return;
+ const grp={};hits=[];
+ for(const c of G.players)G.tok[c].forEach((s,i)=>{const p=pos(c,s,i);(grp[p.join()]=grp[p.join()]||[]).push({c,i,s,p})});
+ const mv=movable(),t=Date.now()/260;
+ for(const k in grp){const a=grp[k];a.forEach((o,j)=>{
+  const x=(o.p[0]+(j-(a.length-1)/2)*(o.s==56?.3:.2))*U,y=o.p[1]*U,r=(o.s==56?.2:.36)*U;
+  if(G.phase=='move'&&o.c==cur()&&mv.includes(o.i)){g.beginPath();g.arc(x,y,r+U*(.1+.05*Math.sin(t)),0,7);g.strokeStyle='#ffd23f';g.lineWidth=U*.12;g.stroke()}
+  g.beginPath();g.arc(x,y+r*.18,r,0,7);g.fillStyle='rgba(0,0,0,.3)';g.fill();
+  g.beginPath();g.arc(x,y,r,0,7);g.fillStyle=COL[o.c];g.fill();g.lineWidth=U*.1;g.strokeStyle=DK[o.c];g.stroke();
+  g.beginPath();g.arc(x-r*.28,y-r*.28,r*.28,0,7);g.fillStyle='rgba(255,255,255,.65)';g.fill();
+  hits.push({x,y,r,c:o.c,i:o.i})})}
+}
+(function loop(){draw();requestAnimationFrame(loop)})();
+
+/* ---------- dice ---------- */
+const F={1:[4],2:[0,8],3:[0,4,8],4:[0,2,6,8],5:[0,2,4,6,8],6:[0,2,3,5,6,8]};
+function face(n){const d=$('dice');d.innerHTML='';for(let i=0;i<9;i++){const e=document.createElement('i');if(F[n].includes(i))e.className='p';d.appendChild(e)}}
+face(6);
+
+/* ---------- game flow ---------- */
+function ui(){if(!G)return;const c=cur();$('dot').style.background=COL[c];$('dice').style.borderColor=COL[c];
+ const n=c[0].toUpperCase()+c.slice(1);$('say').textContent=G.phase=='move'?(isBot(c)?n+' is thinking…':n+': tap a token'):G.phase=='roll'?(isBot(c)?n+' (bot)':n+': roll the dice'):n}
+function next(){G.i=(G.i+1)%G.players.length;G.phase='roll'}
+function loopTurn(){ui();sync();if(G.phase=='roll'&&isBot(cur()))setTimeout(roll,800)}
+async function roll(){
+ if(!G||G.phase!='roll')return;G.phase='anim';$('dice').classList.add('sh');
+ const c=cur(),k=forced.findIndex(f=>f.c=='any'||f.c==c);
+ const v=k>=0?forced.splice(k,1)[0].v:1+Math.floor(Math.random()*6);
+ for(let n=0;n<8;n++){face(1+Math.floor(Math.random()*6));await sl(70)}
+ face(v);$('dice').classList.remove('sh');G.dice=v;G.phase='move';
+ const m=movable();
+ if(!m.length){G.phase='anim';sync();await sl(800);next();loopTurn();return}
+ ui();sync();
+ if(isBot(c)){await sl(600);move(pick(m))}else if(m.length==1){await sl(350);move(m[0])}
+}
+function pick(m){const c=cur(),d=G.dice;let b=m[0],bs=-1;
+ for(const i of m){const s=G.tok[c][i],n=s<0?0:s+d;let sc=n;
+  if(n==56)sc=200;else if(n<=50){const a=abs(c,n);if(SAFE.has(a))sc+=20;
+   for(const o of G.players)if(o!=c)for(const x of G.tok[o])if(x>=0&&x<=50&&abs(o,x)==a&&!SAFE.has(a))sc+=100}
+  if(s<0)sc+=60;if(sc>bs){bs=sc;b=i}}return b}
+async function move(i){
+ if(G.phase!='move')return;const c=cur(),d=G.dice,T=G.tok[c];G.phase='anim';let cap=false;
+ if(T[i]<0){T[i]=0;await sl(220)}else for(let k=0;k<d;k++){T[i]++;await sl(150)}
+ const s=T[i];
+ if(s<=50&&!SAFE.has(abs(c,s)))for(const o of G.players)if(o!=c)G.tok[o].forEach((x,j)=>{if(x>=0&&x<=50&&abs(o,x)==abs(c,s)){G.tok[o][j]=-1;cap=true}});
+ if(T.every(x=>x==56)){G.phase='done';sync();overlay('win',c);return}
+ if(d==6||cap||s==56)G.phase='roll';else next();
+ loopTurn();
+}
+cv.addEventListener('pointerdown',e=>{
+ if(!G||G.phase!='move'||isBot(cur()))return;const r=cv.getBoundingClientRect(),k=cv.width/r.width,x=(e.clientX-r.left)*k,y=(e.clientY-r.top)*k,mv=movable();
+ for(const h of hits)if(h.c==cur()&&mv.includes(h.i)&&Math.hypot(h.x-x,h.y-y)<h.r*1.5){move(h.i);return}
+});
+$('rb').onclick=()=>{if(G&&G.phase=='roll'&&!isBot(cur()))roll()};
+$('dice').onclick=$('rb').onclick;
+
+/* ---------- menu ---------- */
+function overlay(kind,c){const o=$('ov');o.style.display='flex';
+ if(kind=='win'){o.innerHTML=`<h1 style="color:${COL[c]}">${c.toUpperCase()} WINS!</h1><button id=again>Play again</button>`;$('again').onclick=()=>overlay('menu')}
+ else{const lab=['Off','Human','Bot'];
+  o.innerHTML=`<h1>LUDO</h1><div id=seats></div><div>Tap a colour: Off → Human → Bot</div>
+  <input id=su placeholder="Portal server, e.g. ws://192.168.0.5:3000" value="${localStorage.url||''}">
+  <input id=sr placeholder="Room code (for the web portal)" value="${localStorage.room||''}">
+  <button id=go>Play</button>${G?'<button id=back>Back to game</button>':''}`;
+  const sd=$('seats');for(const c of C){const b=document.createElement('button');b.style.background=COL[c];
+   const upd=()=>b.textContent=c+': '+lab[seat[c]];upd();b.onclick=()=>{seat[c]=(seat[c]+1)%3;upd()};sd.appendChild(b)}
+  $('go').onclick=()=>{const pl=C.filter(c=>seat[c]);if(pl.length<2){alert('Pick at least 2 players');return}
+   localStorage.url=$('su').value.trim();localStorage.room=$('sr').value.trim();
+   G={players:pl,tok:Object.fromEntries(pl.map(c=>[c,[-1,-1,-1,-1]])),i:0,dice:0,phase:'roll'};
+   o.style.display='none';face(6);connect();loopTurn()};
+  if($('back'))$('back').onclick=()=>o.style.display='none'}
+}
+$('menu').onclick=()=>overlay('menu');
+
+/* ---------- web portal link ---------- */
+function sync(){if(ws&&ws.readyState==1&&G)ws.send(JSON.stringify({type:'state',turn:cur(),phase:G.phase,dice:G.dice,queue:forced,players:G.players}))}
+function connect(){
+ if(ws){ws.onclose=null;ws.close();ws=null}$('lk').className='';
+ const u=localStorage.url,r=localStorage.room;if(!u||!r)return;
+ try{ws=new WebSocket(u.replace(/\/$/,'')+'/?role=app&room='+encodeURIComponent(r))}catch(e){return}
+ ws.onopen=()=>{$('lk').className='on';sync()};
+ ws.onclose=()=>{$('lk').className='';setTimeout(()=>{if(ws)connect()},3000)};
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch{return}
+  if(m.type=='force'&&m.value>=1&&m.value<=6)forced.push({v:+m.value,c:m.color||'any'});
+  if(m.type=='clear')forced=[];
+  if(m.type=='roll'&&G&&G.phase=='roll'&&!isBot(cur()))roll();
+  sync()};
+}
+addEventListener('resize',fit);fit();overlay('menu');
+</script></body></html>

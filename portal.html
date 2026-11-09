@@ -1,0 +1,44 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Ludo Dice Portal</title>
+<style>
+body{margin:0;background:#1c2260;color:#fffaf0;font:600 16px system-ui,sans-serif;display:flex;justify-content:center}
+main{width:100%;max-width:460px;padding:18px}
+h1{margin:0 0 14px;font-size:26px}
+input,button{font:inherit;border:0;border-radius:12px;padding:12px 14px}
+input{background:#fffaf0;color:#222;width:100%;margin-bottom:10px}
+button{background:#ffd23f;color:#222;box-shadow:0 4px 0 #b58a00;cursor:pointer}
+button:active{transform:translateY(3px);box-shadow:0 1px 0 #b58a00}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.d{width:30%;height:84px;font-size:40px;flex:1 0 28%}
+.c{flex:1;color:#fff;box-shadow:none;border:4px solid transparent}.c.on{border-color:#fff}
+#info{background:rgba(255,255,255,.1);border-radius:12px;padding:12px;line-height:1.7}
+#dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:#e53935;margin-right:6px}
+#dot.ok{background:#43a047}
+</style></head><body><main>
+<h1>Ludo dice portal</h1>
+<div id=login><input id=room placeholder="Room code (same as in the app)"><button id=con>Connect</button></div>
+<div id=ctl hidden>
+<div id=info><span id=dot></span><span id=lnk>Waiting for app…</span><br>Turn: <b id=turn>-</b> &nbsp; Last dice: <b id=last>-</b><br>Queued: <b id=q>none</b></div>
+<p>Who gets the number?</p>
+<div class=row id=cols></div>
+<p>Set the next dice number</p>
+<div class=row id=dice></div>
+<div class=row><button id=roll>Roll for current player</button><button id=clr>Clear queue</button></div>
+</div></main>
+<script>
+const $=i=>document.getElementById(i),COL={any:'#555',red:'#e53935',green:'#43a047',yellow:'#c9a400',blue:'#1e88e5'};
+let ws,who='any';
+for(const c in COL){const b=document.createElement('button');b.className='c'+(c=='any'?' on':'');b.style.background=COL[c];b.textContent=c=='any'?'Any':c;b.onclick=()=>{who=c;document.querySelectorAll('.c').forEach(x=>x.classList.remove('on'));b.classList.add('on')};$('cols').append(b)}
+for(let n=1;n<=6;n++){const b=document.createElement('button');b.className='d';b.textContent=n;b.onclick=()=>send({type:'force',value:n,color:who});$('dice').append(b)}
+const send=o=>ws&&ws.readyState==1&&ws.send(JSON.stringify(o));
+$('roll').onclick=()=>send({type:'roll'});$('clr').onclick=()=>send({type:'clear'});
+$('room').value=localStorage.room||'';
+$('con').onclick=()=>{const r=$('room').value.trim();if(!r)return;localStorage.room=r;
+ ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/?role=portal&room='+encodeURIComponent(r));
+ ws.onopen=()=>{$('login').hidden=true;$('ctl').hidden=false};
+ ws.onclose=()=>{$('dot').className='';$('lnk').textContent='Disconnected. Reconnecting…';setTimeout($('con').onclick,2000)};
+ ws.onmessage=e=>{const m=JSON.parse(e.data);
+  if(m.type=='link'){$('dot').className=m.app?'ok':'';$('lnk').textContent=m.app?'App connected':'Waiting for app…'}
+  if(m.type=='state'){$('dot').className='ok';$('lnk').textContent='App connected';$('turn').textContent=m.turn+' ('+m.phase+')';$('last').textContent=m.dice||'-';
+   $('q').textContent=m.queue.length?m.queue.map(f=>f.v+(f.c=='any'?'':' → '+f.c)).join(', '):'none'}}};
+</script></body></html>
